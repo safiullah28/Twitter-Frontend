@@ -1,0 +1,69 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ secrets.NODE_VERSION }}
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Build frontend locally
+        run: |
+          yarn install --frozen-lockfile
+          yarn build
+
+      - name: Deploy frontend
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 root@${{ secrets.DEPLOY_HOST }} << 'EOF'
+            set -e
+            mkdir -p $DEPLOY_PATH
+            cd $DEPLOY_PATH
+
+            # Pull latest code or clone
+            if [ -d .git ]; then
+              git reset --hard
+              git pull origin main
+            else
+              git clone https://github.com/safiullah28/Twitter-Frontend.git .
+            fi
+
+            # Copy the build folder from GitHub Actions runner via rsync
+EOF
+
+          # Rsync build folder to server
+          rsync -avz -e "ssh -i ~/.ssh/id_ed25519" ./build/ root@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PATH }}/build/
+
+          # Create .env and start with PM2
+          ssh -i ~/.ssh/id_ed25519 root@${{ secrets.DEPLOY_HOST }} << 'EOF'
+            cat > $DEPLOY_PATH/.env <<EOT
+VITE_BACKEND_URL=$VITE_BACKEND_URL
+FRONTEND_URL=$FRONTEND_URL
+EOT
+
+            pm2 delete ci-frontend || true
+            pm2 start "npx serve -s $DEPLOY_PATH/build -l 5173" --name ci-frontend
+            pm2 save
+EOF
