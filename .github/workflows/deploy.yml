@@ -58,7 +58,7 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          rsync -avz --delete -e "ssh -i ~/.ssh/id_ed25519" ./build/ root@${DEPLOY_HOST}:${DEPLOY_PATH}/build/
+          rsync -avz --delete -e "ssh -i ~/.ssh/id_ed25519" ./dist/ root@${DEPLOY_HOST}:${DEPLOY_PATH}/build/
 
       - name: Create .env and restart PM2
         env:
