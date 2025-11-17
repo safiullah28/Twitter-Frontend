@@ -1,40 +1,34 @@
+---
 name: Deploy Frontend
-
 on:
   push:
     branches:
       - main
-
 jobs:
   deploy-frontend:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ secrets.NODE_VERSION }}
-
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
-
       - name: Build frontend locally
         run: |
           yarn install --frozen-lockfile
           yarn build
-
       - name: Prepare deploy folder (init repo if needed)
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-        run: |
+        run: >
           ssh -i ~/.ssh/id_ed25519 root@${DEPLOY_HOST} "bash -lc '
             set -e
             mkdir -p ${DEPLOY_PATH}
@@ -52,28 +46,26 @@ jobs:
               git reset --hard origin/main
             fi
           '"
-
       - name: Upload build folder
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-        run: |
-          rsync -avz --delete -e "ssh -i ~/.ssh/id_ed25519" ./dist/ root@${DEPLOY_HOST}:${DEPLOY_PATH}/build/
-
+        run: >
+          rsync -avz --delete -e "ssh -i ~/.ssh/id_ed25519" ./dist/
+          root@${DEPLOY_HOST}:${DEPLOY_PATH}/build/
       - name: Create .env and restart PM2
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}
           FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
-        run: |
-          ssh -i ~/.ssh/id_ed25519 root@${DEPLOY_HOST} "bash -lc '
-            cat > ${DEPLOY_PATH}/.env << \"EOT\"
-          VITE_BACKEND_URL=${VITE_BACKEND_URL}
-          FRONTEND_URL=${FRONTEND_URL}
-          EOT
+        run: >
+          ssh -i ~/.ssh/id_ed25519 root@$DEPLOY_HOST "cd $DEPLOY_PATH && echo -e
+          \"VITE_BACKEND_URL=$VITE_BACKEND_URL\nFRONTEND_URL=$FRONTEND_URL\" >
+          .env"
 
-            pm2 delete ci-frontend || true
-            pm2 start \"npx serve -s ${DEPLOY_PATH}/build -l 5173\" --name ci-frontend
-            pm2 save
-          '"
+          ssh -i ~/.ssh/id_ed25519 root@$DEPLOY_HOST "pm2 delete ci-frontend || true"
+
+          ssh -i ~/.ssh/id_ed25519 root@$DEPLOY_HOST "pm2 start \"npx serve -s $DEPLOY_PATH/build -l 5173\" --name ci-frontend"
+
+          ssh -i ~/.ssh/id_ed25519 root@$DEPLOY_HOST "pm2 save"
